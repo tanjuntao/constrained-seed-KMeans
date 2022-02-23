@@ -1,10 +1,12 @@
 import copy
 
+import matplotlib.pyplot as plt
 import numpy as np
 import torch
 
 
 class ConstrainedSeedKMeans:
+    """Constrained seed KMeans algorithm proposed by Basu et al. in 2002."""
     def __init__(self,
                  n_clusters=2,
                  *,
@@ -12,17 +14,31 @@ class ConstrainedSeedKMeans:
                  max_iter=300,
                  tol=0.0001,
                  verbose=False,
-                 random_state=None,
                  invalide_label=-1):
+        """Initialization a constrained seed kmeans estimator.
+
+        Args:
+            n_clusters: The number of clusters.
+            n_init: The number of times the algorithm will run in order to choose
+                the best result.
+            max_iter: The maximum number of iterations the algorithm will run.
+            tol: The convergence threshold of the algorithm. If the norm of a
+                matrix, which is the difference between two consective cluster
+                centers, is less than this threshold, we think the algorithm converges.
+            verbose: Whether to print intermediate results to console.
+            invalide_label: Spicial sign to indicate which samples are unlabeled.
+                If the y value of a sample equals to this value, then that sample
+                is a unlabeled one.
+        """
         self.n_clusters = n_clusters
         self.n_init = n_init
         self.max_iter = max_iter
         self.tol = tol
         self.verbose = verbose
-        self.random_state = random_state
         self.INVALID_LABEL = invalide_label
 
     def _check_params(self, X, y):
+        """Check if the parameters of the algorithm and the inputs to it are valid."""
         if type(X) not in (np.ndarray, torch.Tensor):
             raise TypeError(f"Type of X can only take numpy.ndarray and "
                             f"torch.Tensor, but got {type(X)} instead.")
@@ -39,6 +55,7 @@ class ConstrainedSeedKMeans:
             raise ValueError(f"The number of maximum iteration must larger than zero.")
 
     def _init_centroids(self, X, y):
+        """Initialize cluster centers with little samples having label."""
         if type(X) == np.ndarray and type(y) == list:
             y = np.array(y)
             pkg = np
@@ -56,12 +73,12 @@ class ConstrainedSeedKMeans:
                                                     f"number of clusters."
 
         centers = pkg.empty((self.n_clusters, X.shape[1]), dtype=X.dtype)
-        # seed centroids
+        # First, initialize seed centers using samples with label
         for i in range(n_seed_centroids):
             seed_samples = X[y == i]
             centers[i] = seed_samples.mean(axis=0)
 
-        # random centroids
+        # Then, initilize the remaining centers with random samples from X
         unlabel_idxes = pkg.where(y == self.INVALID_LABEL)[0] # np.where returns a tuple
         for i in range(n_seed_centroids, self.n_clusters):
             idx = np.random.choice(unlabel_idxes, 1, replace=False)
@@ -70,6 +87,7 @@ class ConstrainedSeedKMeans:
         return centers, n_seed_centroids
 
     def _kmeans(self, X, y, init_centers):
+        """KMeans algorithm implementation."""
         indices = copy.copy(y)
         if type(indices) == list:
             indices = np.array(indices)
@@ -77,9 +95,12 @@ class ConstrainedSeedKMeans:
         cur_centers = init_centers
         new_centers = copy.deepcopy(init_centers)
 
+        # Main loop
         for iter_ in range(self.max_iter):
             # Fist step in KMeans: calculate the closest centroid for each sample
             for i in range(n_samples):
+                # If this sample has label, then we use the ground-truth label
+                # as its cluster index
                 if y[i] != self.INVALID_LABEL:
                     continue
 
@@ -116,7 +137,7 @@ class ConstrainedSeedKMeans:
                 difference = torch.norm(new_centers - cur_centers, p='fro')
             if difference < self.tol:
                 if self.verbose:
-                    print('Converged at iteration {}'.format(iter_))
+                    print('Converged at iteration {}.\n'.format(iter_))
                 break
 
             # ATTENSION: Avoid using direct assignment like cur_centers = new_centers
@@ -127,13 +148,24 @@ class ConstrainedSeedKMeans:
         return new_centers, indices, inertia
 
     def fit(self, X, y):
+        """Using features and little labels to do clustering.
+
+        Args:
+            X: numpy.ndarray or torch.Tensor with shape (n_samples, n_features)
+            y: List or numpy.ndarray, or torch.Tensor with shape (n_samples,).
+                For index i, if y[i] equals to self.INVALID_LABEL, then X[i] is
+                an unlabels sample.
+
+        Returns:
+            self: The estimator itself.
+        """
         self._check_params(X, y)
 
         _, n_seed_centroids = self._init_centroids(X, y)
         if n_seed_centroids == self.n_clusters:
             self.n_init = 1
 
-        # run constrained seed KMeans n_init times to choose the best one
+        # run constrained seed KMeans n_init times in order to choose the best one
         best_inertia = None
         best_centers, best_indices = None, None
         for i in range(self.n_init):
@@ -153,6 +185,15 @@ class ConstrainedSeedKMeans:
         return self
 
     def predict(self, X):
+        """Predict the associated cluster index of samples.
+
+        Args:
+            X: numpy.ndarray or torch.Tensor with shape (n_samples, n_features).
+
+        Returns:
+            indices: The associated cluster index of each sample, with shape
+            (n_samples,)
+        """
         n_samples = X.shape[0]
         indices = [-1 for _ in range(n_samples)]
 
@@ -169,9 +210,18 @@ class ConstrainedSeedKMeans:
             return torch.tensor(indices)
 
     def fit_predict(self, X, y):
+        """Convenient function."""
         return self.fit(X, y).predict(X)
 
     def transform(self, X):
+        """Transform the input to the centorid space.
+
+        Args:
+            X: numpy.ndarray or torch.Tensor with shape (n_samples, n_features).
+
+        Returns:
+            output: With shape (n_samples, n_clusters)
+        """
         if type(X) == np.ndarray:
             pkg = np
         else:
@@ -188,51 +238,69 @@ class ConstrainedSeedKMeans:
         return output
 
     def fit_transform(self, X, y):
+        """Convenient function"""
         return self.fit(X, y).transform(X)
 
     def score(self, X):
+        """Opposite of the value of X on the K-means objective."""
         interia = 0
         n_samples = X.shape[0]
 
         for i in range(n_samples):
             if type(X) == np.ndarray:
-                interia += np.linalg.norm(self.cluster_centers_ - X[i], axis=1).sum()
+                interia += np.linalg.norm(self.cluster_centers_ - X[i], axis=1).min()
             else:
-                interia += torch.norm(self.cluster_centers_ - X[i], dim=1).sum().item()
+                interia += torch.norm(self.cluster_centers_ - X[i], dim=1).min().item()
 
         return -1 * interia
 
 
+def plot(X, estimator, name):
+    import pandas as pd
+    import seaborn as sns
+
+    df = pd.DataFrame()
+    df['dim1'] = X[:, 0]
+    df['dim2'] = X[:, 1]
+    if name == 'sklearn_kmeans':
+        df['y'] = estimator.labels_
+    else:
+        df['y'] = estimator.indices
+    plt.close()
+    plt.xlim(0.1, 0.9)
+    plt.ylim(0.0, 0.8)
+    sns.scatterplot(x='dim1', y='dim2', hue=df.y.tolist(),
+                    palette=sns.color_palette('hls', 3), data=df)
+    plt.savefig('./figures/{}.pdf'.format(str.upper(name)))
+
+
 if __name__ == '__main__':
+    # Load watermelon-4.0 dataset from book Machine Learning by Zhihua Zhou
     dataset = np.genfromtxt('./watermelon_4.0.txt', delimiter=',')
     X = dataset[:, 1:] # the first column are IDs
-    y = [-1 for _ in range(X.shape[0])]
+    y = [-1 for _ in range(X.shape[0])] # by default, all samples has no label
 
-    # from sklearn.datasets import load_iris
-    # iris = load_iris()
-    # X = iris['data'][:, :4]
-    # y = [-1 for _ in range(X.shape[0])]
+    # 1. KMeans with no additional labels
+    # reference: Machine Learning book, chapter 9.4
+    kmeans = ConstrainedSeedKMeans(n_clusters=3, n_init=10, verbose=False)
+    kmeans.fit(X, y)
+    indices = kmeans.indices
+    plot(X, kmeans, name='kmeans')
 
-    estimator = ConstrainedSeedKMeans(n_clusters=3, n_init=10, verbose=True)
-    estimator.fit(X, y)
-    print(estimator.inertia_)
-    print(estimator.indices)
-    #
-    # import matplotlib.pyplot as plt
-    # import seaborn as sns
-    # import pandas as pd
-    # df = pd.DataFrame()
-    # df['y'] = estimator.indices
-    # df['dim1'] = X[:, 0]
-    # df['dim2'] = X[:, 1]
-    # sns.scatterplot(x='dim1', y='dim2', hue=df.y.tolist(), palette=sns.color_palette('hls', 3), data=df)
-    # plt.show()
+    # 2. Constrained seed KMeans with little labels
+    # reference: Machine Learning book ,chapter 13.6
+    seed_kmeans = ConstrainedSeedKMeans(n_clusters=3, n_init=10, verbose=False)
+    y[3], y[24] = 0, 0
+    y[11], y[19] = 1, 1
+    y[13], y[16] = 2, 2
+    seed_kmeans.fit(X, y)
+    plot(X, seed_kmeans, name='seed_kmeans')
 
-    # from sklearn.cluster import KMeans
-    # # init_centers = np.array([[0.403, 0.237], [0.343, 0.099], [0.532, 0.472]])
-    # clf = KMeans(n_clusters=3,  verbose=1)
-    # clf.fit(X)
-    # # print(clf.inertia_)
+    # 3. scikit-learn build-in KMeans
+    from sklearn.cluster import KMeans
+    sklearn_kmeans = KMeans(n_clusters=3)
+    sklearn_kmeans.fit(X)
+    plot(X, sklearn_kmeans, 'sklearn_kmeans')
 
 
 
