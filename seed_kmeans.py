@@ -56,12 +56,18 @@ class ConstrainedSeedKMeans:
 
     def _init_centroids(self, X, y):
         """Initialize cluster centers with little samples having label."""
-        if type(X) == np.ndarray and type(y) == list:
+        if type(y) == np.ndarray:
+            pkg = np
+        elif type(y) == torch.Tensor:
+            pkg = torch
+        elif type(y) == list and type(X) == np.ndarray:
             y = np.array(y)
             pkg = np
-        if type(X) == torch.Tensor and type(y) == list:
+        elif type(y) == list and type(X) == torch.Tensor:
             y = torch.Tensor(y)
             pkg = torch
+        else:
+            raise TypeError('Data type is not supported, please check it again.')
 
         y_unique = pkg.unique(y)
         if self.INVALID_LABEL in y_unique:
