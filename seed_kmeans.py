@@ -86,9 +86,26 @@ class ConstrainedSeedKMeans:
 
         # Then, initilize the remaining centers with random samples from X
         unlabel_idxes = pkg.where(y == self.INVALID_LABEL)[0] # np.where returns a tuple
-        for i in range(n_seed_centroids, self.n_clusters):
-            idx = np.random.choice(unlabel_idxes, 1, replace=False)
-            centers[i] = X[idx]
+        # for i in range(n_seed_centroids, self.n_clusters):
+        #     idx = np.random.choice(unlabel_idxes, 1, replace=False)
+        #     centers[i] = X[idx]
+
+        # If all samples are labeled, kmeans algorithm may not updates itself, moreover, there is no need for clustering
+        if len(unlabel_idxes) == 0:
+            raise ValueError("All samples are labeled! No need for clustering!")
+
+        if len(unlabel_idxes) < self.n_clusters - n_seed_centroids:
+            # In this case, we randomly select (self.n_clusters - n_seed_centroids) different data points from the whole dataset
+            idx = np.random.randint(X.shape[0], size=self.n_clusters - n_seed_centroids)
+            print('index', idx)
+
+            for i in range(n_seed_centroids, self.n_clusters):
+                centers[i] = X[idx[i - n_seed_centroids]]
+
+        else:
+            for i in range(n_seed_centroids, self.n_clusters):
+                idx = np.random.choice(unlabel_idxes, 1, replace=False)
+                centers[i] = X[idx]
 
         return centers, n_seed_centroids
 
@@ -303,10 +320,10 @@ if __name__ == '__main__':
     plot(X, seed_kmeans, name='seed_kmeans')
 
     # 3. scikit-learn build-in KMeans
-    from sklearn.cluster import KMeans
-    sklearn_kmeans = KMeans(n_clusters=3)
-    sklearn_kmeans.fit(X)
-    plot(X, sklearn_kmeans, 'sklearn_kmeans')
+    # from sklearn.cluster import KMeans
+    # sklearn_kmeans = KMeans(n_clusters=3)
+    # sklearn_kmeans.fit(X)
+    # plot(X, sklearn_kmeans, 'sklearn_kmeans')
 
 
 
